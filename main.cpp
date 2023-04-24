@@ -11,6 +11,7 @@ int main(int argc, char* argv[]) {
     config.parse_arg(argc, argv);
 
     WebServer server;
+    WebServer server;
 
     // 初始化
     server.init(config.PORT, user, passwd, databasename, config.LOGWrite,

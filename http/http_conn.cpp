@@ -51,8 +51,11 @@ void http_conn::initmysql_result(connection_pool* connPool) {
 
 // 对文件描述符设置非阻塞
 int setnonblocking(int fd) {
+    // F_GETFD获得文件描述符
     int old_option = fcntl(fd, F_GETFL);
+    // 设置为非阻塞
     int new_option = old_option | O_NONBLOCK;
+    // 设置文件描述符
     fcntl(fd, F_SETFL, new_option);
     return old_option;
 }
@@ -63,23 +66,26 @@ void addfd(int epollfd, int fd, bool one_shot, int TRIGMode) {
     event.data.fd = fd;
 
     if (1 == TRIGMode) {
+        // ET边缘触发模式
         event.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
     }
     else {
+        // LT水平触发模式
         event.events = EPOLLIN | EPOLLRDHUP;
     }
 
     if (one_shot) {
+        // 判断是否开启EPOLLONESHOT
         event.events |= EPOLLONESHOT;
     }
     epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
-    setnonblocking(fd);
+    setnonblocking(fd);  // 设置为非阻塞
 }
 
 // 从内核时间表删除描述符
 void removefd(int epollfd, int fd) {
     epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, 0);
-    close(fd);
+    close(fd);  // 关闭套接字
 }
 
 // 将事件重置为EPOLLONESHOT
@@ -87,11 +93,12 @@ void modfd(int epollfd, int fd, int ev, int TRIGMode) {
     epoll_event event;
     event.data.fd = fd;
 
-    if (1 == TRIGMode)
+    if (1 == TRIGMode) {
         event.events = ev | EPOLLET | EPOLLONESHOT | EPOLLRDHUP;
-    else
+    }
+    else {
         event.events = ev | EPOLLONESHOT | EPOLLRDHUP;
-
+    }
     epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &event);
 }
 
@@ -186,11 +193,12 @@ http_conn::LINE_STATUS http_conn::parse_line() {
 // 非阻塞ET工作模式下，需要一次性将数据读完
 bool http_conn::read_once() {
     if (m_read_idx >= READ_BUFFER_SIZE) {
+        // 若超出范围则报错
         return false;
     }
     int bytes_read = 0;
 
-    // LT读取数据
+    // LT（水平触发模式）读取数据
     if (0 == m_TRIGMode) {
         bytes_read = recv(m_sockfd, m_read_buf + m_read_idx, READ_BUFFER_SIZE - m_read_idx, 0);
         m_read_idx += bytes_read;
@@ -201,17 +209,35 @@ bool http_conn::read_once() {
 
         return true;
     }
-    // ET读数据
+    // ET（边缘触发模式）读数据
     else {
         while (true) {
+            /**
+             * int recv( SOCKET s, char FAR *buf, int len, int flags);
+             * 第一个参数指定接收端套接字描述符
+             * 第二个参数指明一个缓冲区，该缓冲区用来存放recv函数接收到的数据
+             * 第三个参数指明buf的长度
+             * 第四个参数一般置0
+             *
+             * 成功执行时，返回接收到的字节数
+             * 另一端已关闭则返回0
+             * 失败返回-1
+             * **/
+            // 从套接字接收数据，存储在m_read_buf缓冲区
             bytes_read = recv(m_sockfd, m_read_buf + m_read_idx, READ_BUFFER_SIZE - m_read_idx, 0);
             if (bytes_read == -1) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                // recv失败
+                // 非阻塞ET模式下，需要一次性将数据读完
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // 当errno为EAGAIN或EWOULDBLOCK时，表明读取完毕
                     break;
+                }
                 return false;
             } else if (bytes_read == 0) {
+                // 另一端已关闭
                 return false;
             }
+            // 修改缓冲区最后一个位置，即m_read_idx的读取字节数
             m_read_idx += bytes_read;
         }
         return true;
