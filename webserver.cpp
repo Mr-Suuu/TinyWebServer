@@ -129,15 +129,33 @@ void WebServer::eventListen() {
     // 将上述m_epollfd赋值给http类对象的m_epollfd属性
     http_conn::m_epollfd = m_epollfd;
 
+    /**
+     * 在Linux下，使用socketpair函数能够创建一对套接字进行通信，项目中使用管道通信
+     * int socketpair(int domain, int type, int protocol, int sv[2]);
+     *      - domain表示协议族，PF_UNIX或者AF_UNIX
+     *      - type表示协议，可以是SOCK_STREAM或者SOCK_DGRAM，SOCK_STREAM基于TCP，SOCK_DGRAM基于UDP
+     *      - protocol表示类型，只能为0
+     *      - sv[2]表示套节字柄对，该两个句柄作用相同，均能进行读写双向操作，创建好的套接字分别是sv[0]和sv[1]
+     *      返回值：0为创建成功，-1为创建失败
+     * **/
+    // 创建管道套接字
     ret = socketpair(PF_UNIX, SOCK_STREAM, 0, m_pipefd);
     assert(ret != -1);
+
+    // 设置管道写端为非阻塞
+    // 设置为非阻塞的原因：send是将信息发送给套接字缓冲区，如果缓冲区满了，则会阻塞，这时候会进一步增加信号处理函数的执行时间，为此，将其修改为非阻塞
+    // 这里没有对非阻塞的返回值进行处理，因为定时事件是非必须立即处理的事件，可以云逊这一次定时事件失效
     utils.setnonblocking(m_pipefd[1]);
+
+    // 设置管道读端为ET非阻塞
     utils.addfd(m_epollfd, m_pipefd[0], false, 0);
 
     utils.addsig(SIGPIPE, SIG_IGN);
+    // 传递给主循环的信号量，这里只关注SIGALRM和SIGTERM
     utils.addsig(SIGALRM, utils.sig_handler, false);
     utils.addsig(SIGTERM, utils.sig_handler, false);
 
+    // 每隔TIMESLOT事件出发SIGALRM信号
     alarm(TIMESLOT);
 
     // 工具类,信号和描述符基础操作
@@ -219,14 +237,22 @@ bool WebServer::dealwithsignal(bool &timeout, bool &stop_server) {
     int ret = 0;
     int sig;
     char signals[1024];
+
+    // 从管道读端赌除信号量，成功则返回字节数，失败返回-1
+    // 正常情况下，这里的ret返回值总是1，只有14和15两个ASCII码对应的字符
     ret = recv(m_pipefd[0], signals, sizeof(signals), 0);
     if (ret == -1) {
         return false;
     } else if (ret == 0) {
         return false;
     } else {
+        // 处理信号值对应的逻辑
         for (int i = 0; i < ret; ++i) {
+            // 这里面是字符
             switch (signals[i]) {
+                // 这里是整型
+                // 信号本身是整型数值，管道中传递的是ASCII码表中整型数值对应的字符
+                // switch的变量一般为字符或整型，当switch的变量为字符时，case中可以是字符，也可以是字符对应的ASCII码
                 case SIGALRM: {
                     timeout = true;
                     break;

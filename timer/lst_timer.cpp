@@ -150,23 +150,38 @@ void Utils::addfd(int epollfd, int fd, bool one_shot, int TRIGMode) {
     setnonblocking(fd);
 }
 
-//信号处理函数
+// 信号处理函数
 void Utils::sig_handler(int sig) {
-    //为保证函数的可重入性，保留原来的errno
+    // 为保证函数的可重入性，保留原来的errno
+    // 可重入性表示中断后再次进入该函数，环境变量与之前相同，不会丢失数据
     int save_errno = errno;
     int msg = sig;
+
+    // 将信号量从管道写端写入，传输字符类型，而非整型
     send(u_pipefd[1], (char *) &msg, 1, 0);
+
+    // 将原来的errno赋值为当前的errno
     errno = save_errno;
 }
 
-//设置信号函数
+// 设置信号函数
 void Utils::addsig(int sig, void(handler)(int), bool restart) {
+    // 创建sigaction结构体变量
     struct sigaction sa;
+    // 复制字符 '\0' 到 sa 所指向的字符串的前 sizeof(sa) 个字符
     memset(&sa, '\0', sizeof(sa));
+
+    // 信号处理函数中仅仅发送信号量，不做对应逻辑处理
     sa.sa_handler = handler;
-    if (restart)
+
+    // SA_RESTART，使被信号打断的系统调用自动重新发起
+    // 一旦给信号设置了SA_RESTART标记，那么当执行某个阻塞系统调用时，收到该信号时，进程不会返回，而是重新执行该系统调用
+    if (restart) {
         sa.sa_flags |= SA_RESTART;
+    }
+    // 将所有信号添加到信号集中
     sigfillset(&sa.sa_mask);
+    // 执行sigaction函数
     assert(sigaction(sig, &sa, NULL) != -1);
 }
 

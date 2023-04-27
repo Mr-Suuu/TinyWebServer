@@ -63,7 +63,7 @@ public:
     int m_close_log;
     int m_actormodel;
 
-    int m_pipefd[2];
+    int m_pipefd[2];  // 套接字柄对
     int m_epollfd;
     http_conn *users;
 
