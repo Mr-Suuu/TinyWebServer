@@ -13,7 +13,7 @@ WebServer::WebServer() {
     strcpy(m_root, server_path);
     strcat(m_root, root);
 
-    // 定时器
+    // 定时器，连接资源数组
     users_timer = new client_data[MAX_FD];
 }
 
@@ -168,14 +168,22 @@ void WebServer::timer(int connfd, struct sockaddr_in client_address) {
 
     // 初始化client_data数据
     // 创建定时器，设置回调函数和超时时间，绑定用户数据，将定时器添加到链表中
+    // 初始化该连接对应的连接资源
     users_timer[connfd].address = client_address;
     users_timer[connfd].sockfd = connfd;
+
+    // 创建定时器临时变量
     util_timer *timer = new util_timer;
+    // 设置定时器对应的连接资源
     timer->user_data = &users_timer[connfd];
+    // 设置回调函数
     timer->cb_func = cb_func;
     time_t cur = time(NULL);
+    // 设置绝对超时时间
     timer->expire = cur + 3 * TIMESLOT;
+    // 创建该链接对应的定时器，初始化为前述临时变量
     users_timer[connfd].timer = timer;
+    // 将该定时器添加到链表中
     utils.m_timer_lst.add_timer(timer);
 }
 
@@ -190,8 +198,10 @@ void WebServer::adjust_timer(util_timer *timer) {
 }
 
 void WebServer::deal_timer(util_timer *timer, int sockfd) {
+    // 服务器端关闭连接，移除对应的定时器
     timer->cb_func(&users_timer[sockfd]);
     if (timer) {
+        // 删除定时器
         utils.m_timer_lst.del_timer(timer);
     }
 
@@ -226,6 +236,7 @@ bool WebServer::dealclinetdata() {
                 LOG_ERROR("%s", "Internal server busy");
                 break;
             }
+            // 在这里初始化计时器对象
             timer(connfd, client_address);
         }
         return false;
@@ -238,7 +249,7 @@ bool WebServer::dealwithsignal(bool &timeout, bool &stop_server) {
     int sig;
     char signals[1024];
 
-    // 从管道读端赌除信号量，成功则返回字节数，失败返回-1
+    // 从管道读端读取信号量，成功则返回字节数，失败返回-1
     // 正常情况下，这里的ret返回值总是1，只有14和15两个ASCII码对应的字符
     ret = recv(m_pipefd[0], signals, sizeof(signals), 0);
     if (ret == -1) {
@@ -267,18 +278,25 @@ bool WebServer::dealwithsignal(bool &timeout, bool &stop_server) {
     return true;
 }
 
+// 处理客户连接上接收到的数据
 void WebServer::dealwithread(int sockfd) {
+    // 创建定时器临时变量，将该连接对应的定时器取出来
     util_timer *timer = users_timer[sockfd].timer;
 
+    // 这里优化了加上了reactor模式，原始版本中只有proactor版本，区别？
     // reactor
     if (1 == m_actormodel) {
         if (timer) {
+            // 这个函数的作用是：
+            //      若有数据传输，则将定时器往后延迟3个单位
+            //      并对新的定时器在链表上的位置进行调整
             adjust_timer(timer);
         }
 
         // 若监测到读事件，将该事件放入请求队列
         m_pool->append(users + sockfd, 0);
 
+        // 这部分作用？
         while (true) {
             if (1 == users[sockfd].improv) {
                 if (1 == users[sockfd].timer_flag) {
@@ -294,13 +312,16 @@ void WebServer::dealwithread(int sockfd) {
         if (users[sockfd].read_once()) {
             LOG_INFO("deal with the client(%s)", inet_ntoa(users[sockfd].get_address()->sin_addr));
 
-            //若监测到读事件，将该事件放入请求队列
+            // 若监测到读事件，将该事件放入请求队列
             m_pool->append_p(users + sockfd);
 
+            // 若有数据传输，则将定时器往后延迟3个单位
+            // 对其在链表上的位置进行调整
             if (timer) {
                 adjust_timer(timer);
             }
         } else {
+            // 服务器关闭连接，移除对应的定时器
             deal_timer(timer, sockfd);
         }
     }
@@ -367,7 +388,7 @@ void WebServer::eventLoop() {
             // 处理新到的客户连接
             if (sockfd == m_listenfd) {
                 // 当一个新用户访问时，调用dealclinetdata()为该用户初始化http_conn对象加入epoll监听，和初始化定时器对象，加入非活动连接管理
-                bool flag = dealclinetdata();
+                bool flag = dealclinetdata();  // 在这里初始化定时器对象
                 if (false == flag) {
                     // 初始化失败则跳过
                     continue;
@@ -376,6 +397,7 @@ void WebServer::eventLoop() {
                 // 处理异常事件
                 // 服务器端关闭连接，移除对应的定时器
                 util_timer *timer = users_timer[sockfd].timer;
+                // 处理定时器，这里做了移除对应计时器、从链表中删除计时器的操作
                 deal_timer(timer, sockfd);
             } else if ((sockfd == m_pipefd[0]) && (events[i].events & EPOLLIN)) {
                 // 处理定时器信号
