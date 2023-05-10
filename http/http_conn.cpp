@@ -21,17 +21,18 @@ map <string, string> users;
 void http_conn::initmysql_result(connection_pool *connPool) {
     // 先从连接池中取一个连接
     MYSQL *mysql = NULL;
+    // 基于RAII机制在connPool中取出一个连接
     connectionRAII mysqlcon(&mysql, connPool);
 
     // 在user表中检索username，passwd数据，浏览器端输入
-    //  mysql_query 传入第一个是MYSQL对象，第二个是查询语句
+    // mysql_query 传入第一个是MYSQL对象，第二个是查询语句
     if (mysql_query(mysql, "SELECT username,passwd FROM user")) {
         LOG_ERROR("SELECT error:%s\n", mysql_error(mysql));
     }
 
     // 从表中检索完整的结果集
-    //  mysql_store_result(&mysql)告诉句柄mysql，把查询的数据从服务器端取到客户端，然后缓存起来，放在句柄mysql里面
-    //  这里将结果通过result指针指出
+    // mysql_store_result(&mysql)告诉句柄mysql，把查询的数据从服务器端取到客户端，然后缓存起来，放在句柄mysql里面
+    // 这里将结果通过result指针指出
     MYSQL_RES *result = mysql_store_result(mysql);
 
     // 返回结果集中的列数
@@ -355,6 +356,7 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text) {
         text += 15;
         // 跳过空格和'\t'字符
         text += strspn(text, " \t");
+        // atol：把参数 str 所指向的字符串转换为一个长整数
         m_content_length = atol(text);
     } else if (strncasecmp(text, "Host:", 5) == 0) {
         // 解析请求头部HOST字段
@@ -442,22 +444,22 @@ http_conn::HTTP_CODE http_conn::process_read() {
     return NO_REQUEST;  // 表示读取完成
 }
 
-/**
+/*
  * 将网站根目录和url文件拼接，然后通过stat判断该文件的属性
  * 通过mmap进行映射，将普通文件映射到内存逻辑地址
  * 该函数的返回值试对请求的文件分析后的结果
- **/
+ */
 // 处理请求
 http_conn::HTTP_CODE http_conn::do_request() {
     // 将doc_root复制到m_real_file
-    // 将初始化的m_real_file赋值为网站根目录
+    // 将初始化的m_real_file赋值为网站根目录doc_root
     strcpy(m_real_file, doc_root);
     int len = strlen(doc_root);
-    // printf("m_url:%s\n", m_url);
     // 在m_url中搜索最后一次出现'/'的位置
-    // 返回m_url中最后一次出现字符'/'的位置。如果未找到该值，则函数返回一个空指针
+    // strrchr：返回m_url中最后一次出现字符'/'的位置。如果未找到该值，则函数返回一个空指针
     // 找到url中/所在位置，进而判断/后第一个字符
-    const char* p = strrchr(m_url, '/');
+    // m_url：/2CGISQL.cgi
+    const char *p = strrchr(m_url, '/');
     // cout << "p" << *p << endl;        // '/'
     // cout << "p" << *(p + 1) << endl;  // 2
     // 处理cgi，实现登录和注册校验
@@ -465,13 +467,14 @@ http_conn::HTTP_CODE http_conn::do_request() {
         // 根据标志判断是登录检测(2)还是注册检测(3)
         char flag = m_url[1];
 
-        char* m_url_real = (char*)malloc(sizeof(char) * 200);
+        char *m_url_real = (char *) malloc(sizeof(char) * 200);
         // 将“/”复制到m_url_real
         strcpy(m_url_real, "/");
         // 把m_url + 2所指向的字符串追加到 m_url_real 所指向的字符串的结尾
-        strcat(m_url_real, m_url + 2);
+        strcat(m_url_real, m_url + 2);  // m_url_real: /CGISQL.cgi
         // 把 m_url_real 所指向的字符串复制到 m_real_file + len，最多复制 FILENAME_LEN - len - 1 个字符
         strncpy(m_real_file + len, m_url_real, FILENAME_LEN - len - 1);
+        // m_real_file: /home/sjm/TinyWebServer/root/CGISQL.cgi
         free(m_url_real);  // 释放空间
 
         // 将用户名和密码提取出来
@@ -480,8 +483,10 @@ http_conn::HTTP_CODE http_conn::do_request() {
         // cout << m_string << endl;  user=name&password=passwd
         // 以&为分隔符，前面的为用户名
         int i;
-        for (i = 5; m_string[i] != '&'; ++i)
+        // 取出name
+        for (i = 5; m_string[i] != '&'; ++i) {
             name[i - 5] = m_string[i];
+        }
         name[i - 5] = '\0';
 
         // 以&为分隔符，后面的为密码
@@ -493,7 +498,7 @@ http_conn::HTTP_CODE http_conn::do_request() {
         if (*(p + 1) == '3') {
             // 如果是注册，先检测数据库中是否有重名的
             // 没有重名的，进行增加数据
-            char* sql_insert = (char*)malloc(sizeof(char) * 200);
+            char *sql_insert = (char *) malloc(sizeof(char) * 200);
             // 创建SQL语句
             strcpy(sql_insert, "INSERT INTO user(username, passwd) VALUES(");
             strcat(sql_insert, "'");
@@ -536,7 +541,7 @@ http_conn::HTTP_CODE http_conn::do_request() {
     // 若请求的资源为/0，表示跳转注册界面
     if (*(p + 1) == '0') {
         // 跳转注册页面，GET
-        char* m_url_real = (char*)malloc(sizeof(char) * 200);
+        char *m_url_real = (char *) malloc(sizeof(char) * 200);
         strcpy(m_url_real, "/register.html");
 
         // 将网站目录和/register.html进行拼接，更新到m_real_file中
@@ -545,7 +550,7 @@ http_conn::HTTP_CODE http_conn::do_request() {
         free(m_url_real);
     } else if (*(p + 1) == '1') {
         // 跳转登录页面，GET
-        char* m_url_real = (char*)malloc(sizeof(char) * 200);
+        char *m_url_real = (char *) malloc(sizeof(char) * 200);
         strcpy(m_url_real, "/log.html");
 
         // 将网站目录和/log.html进行拼接，更新到m_real_file中
@@ -554,21 +559,21 @@ http_conn::HTTP_CODE http_conn::do_request() {
         free(m_url_real);
     } else if (*(p + 1) == '5') {
         // 显示图片页面，POST
-        char* m_url_real = (char*)malloc(sizeof(char) * 200);
+        char *m_url_real = (char *) malloc(sizeof(char) * 200);
         strcpy(m_url_real, "/picture.html");
         strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
 
         free(m_url_real);
     } else if (*(p + 1) == '6') {
         // 显示视频页面，POST
-        char* m_url_real = (char*)malloc(sizeof(char) * 200);
+        char *m_url_real = (char *) malloc(sizeof(char) * 200);
         strcpy(m_url_real, "/video.html");
         strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
 
         free(m_url_real);
     } else if (*(p + 1) == '7') {
         // 显示关注页面，POST
-        char* m_url_real = (char*)malloc(sizeof(char) * 200);
+        char *m_url_real = (char *) malloc(sizeof(char) * 200);
         strcpy(m_url_real, "/fans.html");
         strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
 
@@ -602,9 +607,25 @@ http_conn::HTTP_CODE http_conn::do_request() {
         return BAD_REQUEST;
     }
 
-    // 以只读的方式获取文件描述符，通过mmap将该文件映射到内存中
+
     int fd = open(m_real_file, O_RDONLY);
-    m_file_address = (char*)mmap(0, m_file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    /*
+     * void *mmap(void *addr,size_t length,int prot,int flags,int fd,off_t offset);
+     *  功能   将一个文件或者其它对象映射进内存
+     *  参数
+     *      addr 指定映射的超始地址，通常为NULL,由系统指定
+     *      length 映射到内存的文件长度
+     *      prot  映射区的保护方式   读 PROT_READ     写 PROT_WRITE     读写 PROT_READ|PROT_WRITE
+     *      flags 映射区的特性   MAP_SHARED  写入映射区的数据会复制回文件，且允许其它映射该文件的进程共享
+     *                         MAP_PRIVATE  对映射区的写入操作会产生一个映射区的复制(copy-on-write)，对此区域所做的修改不会写回原文件
+     *      fd     由 open 返回的文件描述符，代表要映射的文件
+     *      offset 以文件开始处的偏移量，必须是4K整数倍，通常为0，表示从文件头开始映射
+     *  返回值
+     *      成功  返回创建的映射区首地址
+     *      失败 MAP_FAILED 宏
+    */
+    // 以只读的方式获取文件描述符，通过mmap将该文件fd映射到内存中
+    m_file_address = (char *) mmap(0, m_file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 
     // 关闭资源
     close(fd);
